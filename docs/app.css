@@ -174,7 +174,6 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 8px; }
 .progress { order: 4; flex: 1 1 100%; display: flex; align-items: center; gap: 10px; }
 .progress input { flex: 1; accent-color: var(--accent); height: 18px; margin: 0; cursor: pointer; }
 .time { font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; }
-.keys { order: 5; flex: 1 1 100%; font-size: 0.75rem; color: var(--muted); text-align: center; }
 .now { flex: 1; min-width: 0; }
 .now-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-sub { color: var(--muted); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -205,8 +204,4 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 8px; }
   .player select { flex: 1 1 100%; max-width: none; order: 6; }
   .volume { order: 5; flex: 1 1 100%; }
   .volume input { flex: 1; width: auto; }
-  .keys { display: none; }
-}
-@media (hover: none) {
-  .keys { display: none; }
 }

@@ -361,10 +361,23 @@ async function playFrom(i) {
   }
 }
 
+// Spotify often plays a relinked copy of a song (another release or region) with a
+// different ID, so map what's playing back to the liked song it came from.
+function likedTrack(item) {
+  const byId = (id) => id && tracks.find((t) => t.id === id);
+  const name = item.name.toLowerCase(), artist = item.artists[0]?.name.toLowerCase();
+  return byId(item.linked_from?.id) || byId(item.id) ||
+    tracks.find((t) => t.name.toLowerCase() === name && t.artists[0]?.toLowerCase() === artist);
+}
+
+let pollSeq = 0; // the newest poll wins, so a slow older response can't undo it
+
 async function pollNowPlaying() {
   if (!store.get("token") || document.hidden) return;
+  const seq = ++pollSeq;
   let s = null;
   try { s = await api("/me/player"); } catch { return; }
+  if (seq !== pollSeq) return;
   const item = s && s.item;
   const polled = { progress: s?.progress_ms || 0, duration: item?.duration_ms || 0, at: Date.now() };
   const polledPlaying = !!(s && s.is_playing);
@@ -384,12 +397,13 @@ async function pollNowPlaying() {
   markPlaying();
   if (stale) return;
   if (!item) { $("now-title").textContent = "Nothing playing"; $("now-sub").textContent = ""; return; }
-  const t = tracks.find((x) => x.id === item.id);
+  const t = likedTrack(item);
+  const id = t ? t.id : item.id;
   $("now-title").textContent = item.name;
   $("now-sub").textContent = item.artists.map((a) => a.name).join(", ") +
     (t && t.bpm != null ? ` · ${t.source === "estimate" ? "≈" : ""}${Math.round(t.bpm)} BPM` : "") +
     (s.device ? ` · on ${s.device.id === sdkDeviceId ? "this browser" : s.device.name}` : "");
-  if (item.id !== nowPlayingId) { nowPlayingId = item.id; markPlaying(); }
+  if (id !== nowPlayingId) { nowPlayingId = id; markPlaying(); }
 }
 
 // The playing song's own button pauses/resumes instead of restarting it.
