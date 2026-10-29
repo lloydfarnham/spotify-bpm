@@ -255,11 +255,14 @@ function rowHtml(t, i) {
       `${est ? "≈" : ""}${Math.round(t.bpm)}${t.alt != null ? `<span class="warn">⚠ ≈${Math.round(t.alt)}</span>` : ""}` +
       `<small>${SOURCE_LABEL[t.source] || ""}${est && t.conf != null ? " " + Math.round(t.conf * 100) + "%" : ""}` +
       `${t.rawBpm != null && t.rawBpm !== t.bpm ? ` <span title="Listed as ${Math.round(t.rawBpm)} BPM">×${Math.round(t.bpm / t.rawBpm)}</span>` : ""}</small></div>`;
+  const bpmCell = canEdit
+    ? `<button class="bpm-btn" data-edit="${i}" title="Click to correct this BPM">${bpm}</button>`
+    : bpm;
   return `<li class="row${t.id === nowPlayingId ? " playing" : ""}" data-i="${i}">
     <button class="play" data-play="${i}" aria-label="Play ${esc(t.name)}">&#9654;</button>
     <div class="t"><div class="n">${esc(t.name)}${t.isNew ? '<span class="new-tag">NEW</span>' : ""}</div>
       <div class="a">${esc(t.artistText)}${t.album ? " · " + esc(t.album) : ""}</div></div>
-    ${bpm}
+    ${bpmCell}
     <div class="y">${t.year ?? ""}</div>
     <div class="d">${t.added ? t.added.slice(0, 10) : ""}</div>
     <button class="add" data-add="${i}" aria-label="Add ${esc(t.name)} to a playlist" title="Add to playlist"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
@@ -471,7 +474,7 @@ async function flushVolume() {
 
 // ← / → skip, ↑ / ↓ volume, Space play/pause, 1 = start … 9 = 80%, 0 = 90%
 function onKey(e) {
-  if (!store.get("token") || e.ctrlKey || e.metaKey || e.altKey || $("pl-dialog").open) return;
+  if (!store.get("token") || e.ctrlKey || e.metaKey || e.altKey || $("pl-dialog").open || $("bpm-dialog").open) return;
   const el = e.target;
   const typing = el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "SELECT" ||
     (el.tagName === "INPUT" && el.type !== "range");
@@ -600,6 +603,59 @@ async function createAndAdd() {
   await addToPlaylist(p.id, p.name);
 }
 
+// ---------- manual BPM corrections (only when served by serve.py on this computer) ----------
+
+let canEdit = false;
+let editTrack = null;
+
+function openEdit(t) {
+  editTrack = t;
+  const r = (v) => Math.round(v * 10) / 10;
+  $("bpm-sub").textContent = `${t.name} · ${t.artistText}`;
+  $("bpm-info").innerHTML = t.bpm == null
+    ? `<span class="muted">No BPM found yet.</span>`
+    : `Now <strong>${r(t.bpm)}</strong> <span class="muted">from ${esc(SOURCE_LABEL[t.source] || t.source)}` +
+      `${t.rawBpm !== t.bpm ? `, listed as ${r(t.rawBpm)}` : ""}</span>` +
+      (t.alt != null ? `<br><span class="muted">Preview analysis suggests ≈${r(t.alt)} (${Math.round(t.altConf * 100)}% confident)</span>` : "");
+  const quick = [];
+  if (t.bpm != null) {
+    // Halving below the floor would just be doubled back, so only offer it when it sticks.
+    if (t.bpm / 2 >= MIN_BPM) quick.push([`½ → ${r(t.bpm / 2)}`, r(t.bpm / 2)]);
+    if (t.bpm * 2 <= 300) quick.push([`×2 → ${r(t.bpm * 2)}`, r(t.bpm * 2)]);
+    if (t.alt != null) quick.unshift([`Use estimate ≈${r(t.alt)}`, r(t.alt)]);
+  }
+  $("bpm-quick").innerHTML = quick.map(([label, v]) => `<button class="btn ghost small" type="button" data-v="${v}">${label}</button>`).join("");
+  $("bpm-input").value = t.bpm != null ? r(t.bpm) : "";
+  $("bpm-reset").hidden = t.source !== "override";
+  $("bpm-dialog").showModal();
+  $("bpm-input").select();
+}
+
+async function saveBpm(bpm) {
+  const t = editTrack;
+  if (bpm != null && !(bpm >= 20 && bpm <= 300)) return toast("Enter a BPM between 20 and 300.");
+  let fields;
+  try {
+    const resp = await fetch("api/bpm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-BPM-App": "1" },
+      body: JSON.stringify({ id: t.id, bpm }),
+    });
+    fields = await resp.json();
+    if (!resp.ok) throw new Error(fields.error || "error " + resp.status);
+  } catch (e) {
+    return toast("Couldn't save: " + e.message);
+  }
+  for (const k of ["bpm", "source", "conf", "alt", "altConf"]) delete t[k];
+  Object.assign(t, fields);
+  prepare(t);
+  $("bpm-dialog").close();
+  render();
+  toast(bpm == null
+    ? `Back to the automatic BPM${t.bpm != null ? " (" + Math.round(t.bpm) + ")" : ""}.`
+    : `Saved ${Math.round(t.bpm)} BPM for “${t.name}”.`);
+}
+
 // ---------- local update (only when served by serve.py on this computer) ----------
 
 const IS_LOCAL = ["127.0.0.1", "localhost"].includes(location.hostname);
@@ -623,6 +679,8 @@ async function initLocalUpdate() {
   let s;
   try { s = await jobApi("status"); } catch { return; } // plain file server: no button
   $("update-btn").hidden = false;
+  canEdit = true;
+  render();
   showJob(s);
   if (s.running) { $("update-panel").hidden = false; pollJob(); }
 }
@@ -715,6 +773,8 @@ function wireUi() {
   $("list").addEventListener("click", (e) => {
     const play = e.target.closest("[data-play]");
     if (play) return playFrom(+play.dataset.play);
+    const edit = e.target.closest("[data-edit]");
+    if (edit) return openEdit(view[+edit.dataset.edit]);
     const add = e.target.closest("[data-add]");
     if (add) {
       const t = view[+add.dataset.add];
@@ -733,6 +793,14 @@ function wireUi() {
   $("pl-create").addEventListener("click", createAndAdd);
   $("pl-new-name").addEventListener("keydown", (e) => { if (e.key === "Enter") createAndAdd(); });
   $("pl-close").addEventListener("click", () => $("pl-dialog").close());
+  $("bpm-close").addEventListener("click", () => $("bpm-dialog").close());
+  $("bpm-save").addEventListener("click", () => saveBpm(parseFloat($("bpm-input").value)));
+  $("bpm-input").addEventListener("keydown", (e) => { if (e.key === "Enter") saveBpm(parseFloat($("bpm-input").value)); });
+  $("bpm-reset").addEventListener("click", () => saveBpm(null));
+  $("bpm-quick").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-v]");
+    if (b) saveBpm(+b.dataset.v);
+  });
   $("update-btn").addEventListener("click", () => {
     $("update-panel").hidden = !$("update-panel").hidden;
     if (!$("update-panel").hidden) $("update-panel").scrollIntoView({ behavior: "smooth", block: "start" });

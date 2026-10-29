@@ -129,6 +129,24 @@
     </div>
   </dialog>
 
+  <dialog id="bpm-dialog" class="pl-dialog">
+    <div class="pl-head">
+      <div>
+        <strong>Correct BPM</strong>
+        <div id="bpm-sub" class="pl-sub"></div>
+      </div>
+      <button id="bpm-close" class="btn ghost small" type="button">Cancel</button>
+    </div>
+    <div id="bpm-info" class="bpm-info"></div>
+    <div id="bpm-quick" class="bpm-quick"></div>
+    <div class="pl-new">
+      <input id="bpm-input" type="number" inputmode="decimal" min="20" max="300" step="0.1" placeholder="BPM">
+      <button id="bpm-save" class="btn primary small" type="button">Save</button>
+    </div>
+    <button id="bpm-reset" class="btn ghost small" type="button" hidden>Remove my value (use the automatic BPM)</button>
+    <p class="pl-sub">Saved on this computer. Values under 90 are shown doubled. Publish with Update BPMs to update the live site.</p>
+  </dialog>
+
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="app.js"></script>

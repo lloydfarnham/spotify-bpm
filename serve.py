@@ -18,7 +18,12 @@ import time
 from collections import deque
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
+import bpmdb
+import export_data
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
+SPOTIFY_ID = re.compile(r"^[A-Za-z0-9]{22}$")
+EDIT_LOCK = threading.Lock()
 DOCS = os.path.join(ROOT, "docs")
 DATA_FILE = "docs/data/tracks.json"
 # Progress lines the scripts print: "[12/530]", "batch 10/74", "fetched 50 / 2954", "... 300/2334"
@@ -136,6 +141,27 @@ class Job:
 JOB = Job()
 
 
+def set_override(spotify_id, bpm):
+    """Save (or with bpm=None remove) a manual BPM, re-export, and return the track's BPM fields."""
+    with EDIT_LOCK:
+        db = bpmdb.connect()
+        try:
+            if bpm is None:
+                bpmdb.delete(db, spotify_id, "override")
+            else:
+                bpmdb.save(db, spotify_id, "override", bpm)
+            db.commit()
+            rows = db.execute("SELECT source, bpm, data FROM lookups WHERE spotify_id = ?", (spotify_id,))
+            entries = {s: (b, json.loads(d) if d else None) for s, b, d in rows}
+        finally:
+            db.close()
+        try:
+            export_data.main()  # keep docs/data/tracks.json in step, so a reload shows the change
+        except SystemExit:
+            pass  # no liked_songs.json yet; the override is still saved
+    return export_data.bpm_fields(entries)
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=DOCS, **kwargs)
@@ -180,6 +206,18 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/cancel":
             JOB.cancel()
             return self._json(200, JOB.snapshot())
+        if path == "/api/bpm":
+            sid, bpm = body.get("id"), body.get("bpm")
+            if not isinstance(sid, str) or not SPOTIFY_ID.match(sid):
+                return self._json(400, {"error": "bad track id"})
+            if bpm is not None:
+                try:
+                    bpm = round(float(bpm), 1)
+                except (TypeError, ValueError):
+                    return self._json(400, {"error": "BPM must be a number"})
+                if not 20 <= bpm <= 300:
+                    return self._json(400, {"error": "BPM must be between 20 and 300"})
+            return self._json(200, set_override(sid, bpm))
         return self._json(404, {"error": "not found"})
 
     def log_message(self, fmt, *args):
@@ -192,6 +230,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
+    os.chdir(ROOT)  # the scripts and bpm.db use paths relative to the project folder
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"Serving on http://127.0.0.1:{args.port}/  (Ctrl+C to stop)")
     try:

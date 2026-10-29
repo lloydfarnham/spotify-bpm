@@ -128,6 +128,13 @@ Press **Connect Spotify** to log in. You can then:
 BPMs under 90 are shown doubled (marked ×2, e.g. 72 → 144), so half-time
 listings sort alongside full-tempo ones. The database keeps the original value.
 
+**Correcting a BPM.** When the app is open through `serve.py` on this computer,
+click any BPM to correct it: type a value, or use the quick buttons (×2, ½,
+or "Use estimate" for disputed songs). It's saved as a manual override that
+beats every other source; **Remove my value** goes back to the automatic BPM.
+Publish with **Update BPMs** to update the live site. From the terminal, the
+same thing is `python check_bpm.py --set SPOTIFY_ID BPM` / `--unset SPOTIFY_ID`.
+
 Playback needs Spotify Premium. The data file is public: anyone with the URL
 can see your liked songs and their BPMs.
 
