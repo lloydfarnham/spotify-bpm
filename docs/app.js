@@ -262,7 +262,7 @@ function rowHtml(t, i) {
     ${bpm}
     <div class="y">${t.year ?? ""}</div>
     <div class="d">${t.added ? t.added.slice(0, 10) : ""}</div>
-    <button class="add" data-add="${i}" aria-label="Add ${esc(t.name)} to a playlist" title="Add to playlist">+</button>
+    <button class="add" data-add="${i}" aria-label="Add ${esc(t.name)} to a playlist" title="Add to playlist"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     <a class="open" href="https://open.spotify.com/track/${t.id}" target="_blank" rel="noopener" aria-label="Open in Spotify">&#8599;</a>
   </li>`;
 }
