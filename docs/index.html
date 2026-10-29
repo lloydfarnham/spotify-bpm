@@ -43,6 +43,7 @@
         <option value="disputed">Disputed BPM</option>
       </select>
       <label class="check"><input id="octave" type="checkbox"> Include half/double time</label>
+      <button id="add-shown" class="btn ghost small" hidden>Add shown to playlist</button>
     </div>
   </header>
 
@@ -75,6 +76,7 @@
       <button data-sort="bpm">BPM</button>
       <button data-sort="year">Year</button>
       <button data-sort="added">Added</button>
+      <span></span>
       <span></span>
     </div>
     <ol id="list" class="list"></ol>
@@ -110,6 +112,22 @@
     </div>
     <div class="keys">Keys: ← → skip · ↑ ↓ volume · Space play/pause · 1 start … 0 = 90%</div>
   </div>
+
+  <dialog id="pl-dialog" class="pl-dialog">
+    <div class="pl-head">
+      <div>
+        <strong id="pl-title">Add to playlist</strong>
+        <div id="pl-sub" class="pl-sub"></div>
+      </div>
+      <button id="pl-close" class="btn ghost small" type="button">Close</button>
+    </div>
+    <input id="pl-filter" type="search" placeholder="Find a playlist" autocomplete="off">
+    <ul id="pl-list" class="pl-list"></ul>
+    <div class="pl-new">
+      <input id="pl-new-name" type="text" placeholder="New playlist name" autocomplete="off">
+      <button id="pl-create" class="btn primary small" type="button">Create &amp; add</button>
+    </div>
+  </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>
 

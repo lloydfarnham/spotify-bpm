@@ -65,7 +65,7 @@ h1 { font-size: 1.35rem; margin: 0; flex: 1; letter-spacing: -0.01em; }
 main { max-width: 1100px; margin: 0 auto; padding: 0 8px; }
 .list-head, .row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 96px 56px 96px 36px;
+  grid-template-columns: 40px minmax(0, 1fr) 96px 56px 96px 32px 32px;
   align-items: center; gap: 8px;
 }
 .list-head { padding: 10px 8px 6px; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -93,6 +93,35 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 8px; }
 .y, .d { color: var(--muted); font-size: 0.88rem; font-variant-numeric: tabular-nums; }
 .open { color: var(--muted); text-decoration: none; font-size: 1.1rem; text-align: center; }
 .open:hover { color: var(--accent); }
+.add {
+  width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); background: none;
+  color: var(--muted); cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0;
+}
+.add:hover { color: var(--accent); border-color: var(--accent); }
+
+.pl-dialog {
+  width: min(92vw, 440px); max-height: min(80vh, 620px); padding: 16px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--surface); color: var(--fg);
+  display: none; flex-direction: column; gap: 10px;
+}
+.pl-dialog[open] { display: flex; }
+.pl-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.pl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.pl-sub { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+.pl-dialog input {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 38px;
+}
+.pl-list { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 120px; }
+.pl-list button {
+  width: 100%; display: flex; justify-content: space-between; gap: 12px; text-align: left;
+  background: none; border: 0; border-radius: 8px; padding: 9px 10px; cursor: pointer;
+}
+.pl-list button:hover, .pl-list button:focus-visible { background: var(--row-hover); }
+.pl-list .count { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.pl-list .msg { color: var(--muted); padding: 9px 10px; }
+.pl-new { display: flex; gap: 8px; }
+.pl-new input { flex: 1; min-width: 0; }
+
 .new-tag { font-size: 0.7rem; color: var(--accent); font-weight: 700; margin-left: 6px; }
 .empty { text-align: center; color: var(--muted); padding: 40px 0; }
 
@@ -152,7 +181,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 8px; }
   .top { position: static; }
   .controls select { min-width: 0; }
   .list-head { display: none; }
-  .row { grid-template-columns: 38px minmax(0, 1fr) 70px 28px; }
+  .row { grid-template-columns: 38px minmax(0, 1fr) 70px 30px 26px; }
   .row .y, .row .d { display: none; }
   .range input { width: 80px; }
   .controls select { flex: 1 1 140px; }

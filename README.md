@@ -120,6 +120,13 @@ Press **Connect Spotify** to log in. You can then:
   If the list is empty, open Spotify on the device you want first.
 - **See new likes.** Songs liked since the last export appear marked NEW with
   their BPM pending.
+- **Add to playlists.** The **+** on each row adds that song to one of your
+  playlists (or a new one). **Add shown to playlist** adds everything the
+  current filter shows, in the current order, e.g. all songs from 120 to 130 BPM.
+  The first time, Spotify asks you to approve playlist editing.
+
+BPMs under 90 are shown doubled (marked ×2, e.g. 72 → 144), so half-time
+listings sort alongside full-tempo ones. The database keeps the original value.
 
 Playback needs Spotify Premium. The data file is public: anyone with the URL
 can see your liked songs and their BPMs.

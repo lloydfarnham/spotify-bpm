@@ -11,9 +11,14 @@ const SCOPES = [
   "streaming",
   "user-read-email",
   "user-read-private",
+  "playlist-read-private",
+  "playlist-read-collaborative",
+  "playlist-modify-private",
+  "playlist-modify-public",
 ].join(" ");
 const API = "https://api.spotify.com/v1";
 const QUEUE_SIZE = 50; // tracks sent to Spotify when you press play
+const MIN_BPM = 90; // anything slower is shown doubled (half-time feel counted at full tempo)
 const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent);
 
 const $ = (id) => document.getElementById(id);
@@ -76,7 +81,7 @@ async function tokenRequest(body) {
     access: j.access_token,
     refresh: j.refresh_token || old.refresh,
     expires: Date.now() + (j.expires_in - 60) * 1000,
-    scope: j.scope,
+    scope: j.scope || old.scope,
   };
   store.set("token", token);
   return token;
@@ -152,7 +157,16 @@ async function loadData() {
   $("stats").dataset.generated = data.generated;
 }
 
+function liftBpm(bpm) {
+  if (bpm == null || bpm <= 0) return bpm;
+  while (bpm < MIN_BPM) bpm *= 2;
+  return bpm;
+}
+
 function prepare(t) {
+  t.rawBpm = t.bpm;
+  t.bpm = liftBpm(t.bpm);
+  if (t.alt != null) t.alt = liftBpm(t.alt);
   t.year = t.released && /^\d{4}/.test(t.released) ? +t.released.slice(0, 4) : null;
   t.artistText = t.artists.join(", ");
   t.haystack = (t.name + " " + t.artistText + " " + (t.album || "")).toLowerCase();
@@ -239,7 +253,8 @@ function rowHtml(t, i) {
     : `<div class="bpm${est ? " est" : ""}${t.alt != null ? " disputed" : ""}"${t.alt != null
         ? ` title="Preview analysis suggests ≈${Math.round(t.alt)} BPM (${Math.round(t.altConf * 100)}% confident)"` : ""}>` +
       `${est ? "≈" : ""}${Math.round(t.bpm)}${t.alt != null ? `<span class="warn">⚠ ≈${Math.round(t.alt)}</span>` : ""}` +
-      `<small>${SOURCE_LABEL[t.source] || ""}${est && t.conf != null ? " " + Math.round(t.conf * 100) + "%" : ""}</small></div>`;
+      `<small>${SOURCE_LABEL[t.source] || ""}${est && t.conf != null ? " " + Math.round(t.conf * 100) + "%" : ""}` +
+      `${t.rawBpm != null && t.rawBpm !== t.bpm ? ` <span title="Listed as ${Math.round(t.rawBpm)} BPM">×${Math.round(t.bpm / t.rawBpm)}</span>` : ""}</small></div>`;
   return `<li class="row${t.id === nowPlayingId ? " playing" : ""}" data-i="${i}">
     <button class="play" data-play="${i}" aria-label="Play ${esc(t.name)}">&#9654;</button>
     <div class="t"><div class="n">${esc(t.name)}${t.isNew ? '<span class="new-tag">NEW</span>' : ""}</div>
@@ -247,6 +262,7 @@ function rowHtml(t, i) {
     ${bpm}
     <div class="y">${t.year ?? ""}</div>
     <div class="d">${t.added ? t.added.slice(0, 10) : ""}</div>
+    <button class="add" data-add="${i}" aria-label="Add ${esc(t.name)} to a playlist" title="Add to playlist">+</button>
     <a class="open" href="https://open.spotify.com/track/${t.id}" target="_blank" rel="noopener" aria-label="Open in Spotify">&#8599;</a>
   </li>`;
 }
@@ -455,7 +471,7 @@ async function flushVolume() {
 
 // ← / → skip, ↑ / ↓ volume, Space play/pause, 1 = start … 9 = 80%, 0 = 90%
 function onKey(e) {
-  if (!store.get("token") || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!store.get("token") || e.ctrlKey || e.metaKey || e.altKey || $("pl-dialog").open) return;
   const el = e.target;
   const typing = el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "SELECT" ||
     (el.tagName === "INPUT" && el.type !== "range");
@@ -468,6 +484,120 @@ function onKey(e) {
   else if (/^[0-9]$/.test(e.key)) seekTo(e.key === "0" ? 0.9 : (+e.key - 1) / 10);
   else return;
   e.preventDefault();
+}
+
+// ---------- playlists ----------
+
+let me = null;
+let playlists = null;
+let playlistsAt = 0;
+let addIds = [];
+let addPath = "items"; // Spotify's newer name for playlist tracks; falls back to "tracks"
+
+function hasScope(scope) {
+  return ((store.get("token") || {}).scope || "").split(" ").includes(scope);
+}
+
+function suggestedName() {
+  const min = $("bpm-min").value, max = $("bpm-max").value;
+  return min || max ? `${min || "0"}–${max || "∞"} BPM` : "";
+}
+
+async function openAddDialog(ids, label) {
+  if (!store.get("token")) return login();
+  if (!hasScope("playlist-modify-private")) {
+    if (confirm("Adding to playlists needs permission to edit your Spotify playlists. Reconnect Spotify now?")) login();
+    return;
+  }
+  if (!ids.length) return toast("No songs to add.");
+  if (ids.length > 200 && !confirm(`Add all ${ids.length.toLocaleString()} songs shown to a playlist?`)) return;
+  addIds = ids;
+  $("pl-title").textContent = ids.length === 1 ? "Add to playlist" : `Add ${ids.length.toLocaleString()} songs to a playlist`;
+  $("pl-sub").textContent = label;
+  $("pl-filter").value = "";
+  $("pl-new-name").value = ids.length > 1 ? suggestedName() : "";
+  $("pl-dialog").showModal();
+  renderPlaylists();
+  try {
+    await loadPlaylists();
+  } catch (e) {
+    $("pl-list").innerHTML = `<li class="msg">Couldn't load playlists: ${esc(e.message)}</li>`;
+    return;
+  }
+  renderPlaylists();
+}
+
+async function loadPlaylists() {
+  if (playlists && Date.now() - playlistsAt < 60000) return;
+  me = me || (await api("/me"));
+  const list = [];
+  let url = API + "/me/playlists?limit=50";
+  while (url) {
+    const j = await api(url);
+    // You can only add to playlists you own or collaborate on.
+    list.push(...(j.items || []).filter((p) => p && (p.owner?.id === me.id || p.collaborative)));
+    url = j.next;
+  }
+  playlists = list;
+  playlistsAt = Date.now();
+}
+
+function renderPlaylists() {
+  const el = $("pl-list");
+  if (!playlists) { el.innerHTML = `<li class="msg">Loading your playlists…</li>`; return; }
+  const q = $("pl-filter").value.trim().toLowerCase();
+  const shown = playlists.filter((p) => p.name.toLowerCase().includes(q));
+  el.innerHTML = shown.length
+    ? shown.map((p) => {
+        const n = (p.tracks || p.items || {}).total;
+        return `<li><button type="button" data-pl="${esc(p.id)}"><span>${esc(p.name)}</span>` +
+          `<span class="count">${n != null ? n.toLocaleString() + " songs" : ""}</span></button></li>`;
+      }).join("")
+    : `<li class="msg">${playlists.length ? "No playlists match." : "You don't have any playlists you can edit yet."}</li>`;
+}
+
+async function postTracks(pid, uris) {
+  try {
+    return await api(`/playlists/${pid}/${addPath}`, { method: "POST", body: { uris } });
+  } catch (e) {
+    if (e.status !== 404 || addPath === "tracks") throw e;
+    addPath = "tracks";
+    return api(`/playlists/${pid}/tracks`, { method: "POST", body: { uris } });
+  }
+}
+
+async function addToPlaylist(pid, name) {
+  const uris = addIds.map((id) => "spotify:track:" + id);
+  $("pl-list").innerHTML = `<li class="msg">Adding to “${esc(name)}”…</li>`;
+  try {
+    for (let i = 0; i < uris.length; i += 100) await postTracks(pid, uris.slice(i, i + 100));
+  } catch (e) {
+    renderPlaylists();
+    return toast(e.status === 403 ? "Spotify won't let you add to that playlist." : "Couldn't add: " + e.message);
+  }
+  $("pl-dialog").close();
+  playlistsAt = 0; // song counts changed
+  toast(`Added ${uris.length === 1 ? "1 song" : uris.length.toLocaleString() + " songs"} to “${name}”.`);
+}
+
+async function createAndAdd() {
+  const name = $("pl-new-name").value.trim();
+  if (!name) return $("pl-new-name").focus();
+  const body = { name, public: false, description: "Made with Liked Songs BPM" };
+  let p;
+  try {
+    me = me || (await api("/me"));
+    try {
+      p = await api("/me/playlists", { method: "POST", body });
+    } catch (e) {
+      if (e.status !== 404 && e.status !== 405) throw e;
+      p = await api(`/users/${encodeURIComponent(me.id)}/playlists`, { method: "POST", body });
+    }
+  } catch (e) {
+    return toast("Couldn't create playlist: " + e.message);
+  }
+  if (playlists) playlists.unshift(p);
+  await addToPlaylist(p.id, p.name);
 }
 
 // ---------- local update (only when served by serve.py on this computer) ----------
@@ -566,6 +696,7 @@ function updateAuthUi() {
   $("login").hidden = loggedIn;
   $("logout").hidden = !loggedIn;
   $("player").hidden = !loggedIn;
+  $("add-shown").hidden = !loggedIn;
 }
 
 function wireUi() {
@@ -582,9 +713,26 @@ function wireUi() {
     render();
   }));
   $("list").addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-play]");
-    if (btn) playFrom(+btn.dataset.play);
+    const play = e.target.closest("[data-play]");
+    if (play) return playFrom(+play.dataset.play);
+    const add = e.target.closest("[data-add]");
+    if (add) {
+      const t = view[+add.dataset.add];
+      openAddDialog([t.id], `${t.name} · ${t.artistText}`);
+    }
   });
+  $("add-shown").addEventListener("click", () => {
+    const range = suggestedName();
+    openAddDialog(view.map((t) => t.id), `Everything currently shown${range ? " (" + range + ")" : ""}, in this order`);
+  });
+  $("pl-filter").addEventListener("input", renderPlaylists);
+  $("pl-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-pl]");
+    if (b) addToPlaylist(b.dataset.pl, b.querySelector("span").textContent);
+  });
+  $("pl-create").addEventListener("click", createAndAdd);
+  $("pl-new-name").addEventListener("keydown", (e) => { if (e.key === "Enter") createAndAdd(); });
+  $("pl-close").addEventListener("click", () => $("pl-dialog").close());
   $("update-btn").addEventListener("click", () => {
     $("update-panel").hidden = !$("update-panel").hidden;
     if (!$("update-panel").hidden) $("update-panel").scrollIntoView({ behavior: "smooth", block: "start" });
