@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spotify BPM Checker</title>
+  <style>
+    :root { --bg: #ffffff; --fg: #1d1d1f; --muted: #5f6368; --link: #0b62c4; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #16181c; --fg: #e8eaed; --muted: #9aa0a6; --link: #7ab4ff; }
+    }
+    body { margin: 0; background: var(--bg); color: var(--fg);
+           font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 640px; margin: 0 auto; padding: 48px 16px; }
+    h1 { font-size: 1.8rem; margin: 0 0 8px; }
+    p.lede { color: var(--muted); margin-top: 0; }
+    a { color: var(--link); }
+    footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid color-mix(in srgb, var(--fg) 15%, transparent);
+             color: var(--muted); font-size: 0.95rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Spotify BPM Checker</h1>
+    <p class="lede">A small personal tool that finds the tempo (BPM) of the songs in my Spotify Liked Songs.</p>
+
+    <p>It reads my Liked Songs from Spotify (read-only), then looks up each track's tempo
+      from public music-data services, so I can sort and explore my library by BPM.</p>
+
+    <h2>Data sources</h2>
+    <ul>
+      <li>BPM data provided by <a href="https://getsongbpm.com">GetSongBPM</a>.</li>
+      <li>Audio features from <a href="https://reccobeats.com">ReccoBeats</a>.</li>
+      <li>Track library via the <a href="https://developer.spotify.com/documentation/web-api">Spotify Web API</a>.</li>
+    </ul>
+
+    <footer>
+      Tempo data: <a href="https://getsongbpm.com">GetSongBPM</a>
+    </footer>
+  </main>
+</body>
+</html>
