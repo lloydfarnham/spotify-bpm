@@ -22,6 +22,8 @@ const MIN_BPM = 90; // anything slower is shown doubled (half-time feel counted 
 const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent);
 
 const $ = (id) => document.getElementById(id);
+const ICON_PLAY = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5.5 3l8 5-8 5z" fill="currentColor"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 3h3v10H4zM9 3h3v10H9z" fill="currentColor"/></svg>';
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
@@ -258,8 +260,9 @@ function rowHtml(t, i) {
   const bpmCell = canEdit
     ? `<button class="bpm-btn" data-edit="${i}" title="Click to correct this BPM">${bpm}</button>`
     : bpm;
-  return `<li class="row${t.id === nowPlayingId ? " playing" : ""}" data-i="${i}">
-    <button class="play" data-play="${i}" aria-label="Play ${esc(t.name)}">&#9654;</button>
+  const current = t.id === nowPlayingId;
+  return `<li class="row${current ? " playing" : ""}" data-i="${i}">
+    <button class="play" data-play="${i}" aria-label="${current && isPlaying ? "Pause" : "Play"} ${esc(t.name)}">${current && isPlaying ? ICON_PAUSE : ICON_PLAY}</button>
     <div class="t"><div class="n">${esc(t.name)}${t.isNew ? '<span class="new-tag">NEW</span>' : ""}</div>
       <div class="a">${esc(t.artistText)}${t.album ? " · " + esc(t.album) : ""}</div></div>
     ${bpmCell}
@@ -377,8 +380,8 @@ async function pollNowPlaying() {
     isPlaying = polledPlaying;
     holdUntil = 0;
   }
-  $("toggle").innerHTML = isPlaying ? "&#10074;&#10074;" : "&#9654;";
   updateProgress();
+  markPlaying();
   if (stale) return;
   if (!item) { $("now-title").textContent = "Nothing playing"; $("now-sub").textContent = ""; return; }
   const t = tracks.find((x) => x.id === item.id);
@@ -389,10 +392,26 @@ async function pollNowPlaying() {
   if (item.id !== nowPlayingId) { nowPlayingId = item.id; markPlaying(); }
 }
 
+// The playing song's own button pauses/resumes instead of restarting it.
+function rowPlayClicked(i) {
+  if (view[i] && view[i].id === nowPlayingId) transport("toggle");
+  else playFrom(i);
+}
+
+function setRowIcon(row, playing) {
+  const btn = row.querySelector(".play");
+  const name = view[+row.dataset.i]?.name || "";
+  btn.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
+  btn.setAttribute("aria-label", (playing ? "Pause " : "Play ") + name);
+}
+
+// Highlight the current song's row and show pause on it while it plays.
 function markPlaying() {
-  document.querySelectorAll(".row.playing").forEach((r) => r.classList.remove("playing"));
+  document.querySelectorAll(".row.playing").forEach((r) => { r.classList.remove("playing"); setRowIcon(r, false); });
+  $("toggle").innerHTML = isPlaying ? ICON_PAUSE : ICON_PLAY;
   const i = view.findIndex((t) => t.id === nowPlayingId);
-  if (i >= 0) document.querySelector(`.row[data-i="${i}"]`)?.classList.add("playing");
+  const row = i >= 0 && document.querySelector(`.row[data-i="${i}"]`);
+  if (row) { row.classList.add("playing"); setRowIcon(row, isPlaying); }
 }
 
 async function transport(action) {
@@ -400,7 +419,8 @@ async function transport(action) {
   try {
     if (action === "toggle") {
       pos = { ...pos, progress: currentPosition(), at: Date.now() };
-      isPlaying = !isPlaying; // optimistic, so the bar stops/starts straight away
+      isPlaying = !isPlaying; // optimistic, so the bar and icons switch straight away
+      markPlaying();
       await api(isPlaying ? "/me/player/play" : "/me/player/pause", { method: "PUT" });
     } else {
       pos = { ...pos, progress: 0, at: Date.now() };
@@ -772,7 +792,7 @@ function wireUi() {
   }));
   $("list").addEventListener("click", (e) => {
     const play = e.target.closest("[data-play]");
-    if (play) return playFrom(+play.dataset.play);
+    if (play) return rowPlayClicked(+play.dataset.play);
     const edit = e.target.closest("[data-edit]");
     if (edit) return openEdit(view[+edit.dataset.edit]);
     const add = e.target.closest("[data-add]");
