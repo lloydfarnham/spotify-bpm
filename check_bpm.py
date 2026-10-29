@@ -1,13 +1,15 @@
 """Look up ReccoBeats audio features for every track in liked_songs.json and
-report how many have a BPM (tempo) value.
+report BPM coverage across all sources in bpm.db.
 
-Writes reccobeats_cache.json (including "not found" entries, stored as null)
-and results.csv. Re-runs only query tracks missing from the cache.
+ReccoBeats results (including "not found") are stored in bpm.db, so re-runs
+only query new tracks. Run fill_gaps.py to fill in what ReccoBeats lacks.
 
 Usage:
-    python check_bpm.py                # query missing tracks, then report
-    python check_bpm.py --report-only  # skip the API, report from cache
-    python check_bpm.py --retry-missing  # re-query tracks cached as not found
+    python check_bpm.py                  # query new tracks, then report
+    python check_bpm.py --report-only    # skip the API, just report
+    python check_bpm.py --retry-missing  # re-query tracks ReccoBeats didn't have
+    python check_bpm.py --set SPOTIFY_ID 128   # manual BPM override
+    python check_bpm.py --unset SPOTIFY_ID     # remove an override
 """
 
 import argparse
@@ -17,31 +19,33 @@ import os
 import random
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import requests
+
+import bpmdb
 
 API = "https://api.reccobeats.com/v1/audio-features"
 BATCH_SIZE = 40  # API returns 400 "size must be between 1 and 40" above this
 DELAY = 0.5  # seconds between requests
 SONGS_FILE = "liked_songs.json"
-CACHE_FILE = "reccobeats_cache.json"
+OLD_CACHE_FILE = "reccobeats_cache.json"
 CSV_FILE = "results.csv"
 FEATURE_KEYS = ("tempo", "energy", "danceability", "valence", "key", "mode", "loudness", "isrc", "id")
 
 
-def load_json(path, default):
-    if not os.path.exists(path):
-        return default
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_cache(cache):
-    tmp = CACHE_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cache, f)
-    os.replace(tmp, CACHE_FILE)
+def import_old_cache(db):
+    """One-off migration of the JSON cache used before bpm.db existed."""
+    if not os.path.exists(OLD_CACHE_FILE):
+        return
+    if db.execute("SELECT 1 FROM lookups WHERE source = 'reccobeats' LIMIT 1").fetchone():
+        return
+    with open(OLD_CACHE_FILE, encoding="utf-8") as f:
+        cache = json.load(f)
+    for sid, feat in cache.items():
+        bpmdb.save(db, sid, "reccobeats", feat.get("tempo") if feat else None, feat)
+    db.commit()
+    print(f"Imported {len(cache)} ReccoBeats results from {OLD_CACHE_FILE} into {bpmdb.DB_FILE}.")
 
 
 def spotify_id_from_href(href):
@@ -74,7 +78,7 @@ def fetch_batch(session, ids):
         if resp.status_code != 200:
             sys.exit(f"ReccoBeats error {resp.status_code}: {resp.text[:500]}")
         return resp.json().get("content", [])
-    sys.exit("Giving up after repeated ReccoBeats failures. Progress so far is cached; re-run to resume.")
+    sys.exit("Giving up after repeated ReccoBeats failures. Progress so far is saved; re-run to resume.")
 
 
 def map_results(batch, results, isrc_by_id, stats):
@@ -107,14 +111,16 @@ def map_results(batch, results, isrc_by_id, stats):
     return mapped
 
 
-def query_missing(tracks, cache, retry_missing):
+def query_missing(db, tracks, lookups, retry_missing):
     isrc_by_id = {t["spotify_id"]: t.get("isrc") for t in tracks if t["spotify_id"]}
-    todo = list(dict.fromkeys(
-        sid for sid in isrc_by_id
-        if sid not in cache or (retry_missing and cache[sid] is None)
-    ))
+
+    def needs_query(sid):
+        entry = lookups.get(sid, {}).get("reccobeats")
+        return entry is None or (retry_missing and entry[0] is None)
+
+    todo = [sid for sid in isrc_by_id if needs_query(sid)]
     if not todo:
-        print("All tracks already cached; nothing to query.")
+        print("All tracks already checked on ReccoBeats; nothing to query.")
         return
     batches = [todo[i:i + BATCH_SIZE] for i in range(0, len(todo), BATCH_SIZE)]
     print(f"Querying ReccoBeats for {len(todo)} tracks in {len(batches)} batches...")
@@ -122,16 +128,20 @@ def query_missing(tracks, cache, retry_missing):
     stats = defaultdict(int)
     session = requests.Session()
     session.headers["Accept"] = "application/json"
-    for n, batch in enumerate(batches, 1):
-        mapped = map_results(batch, fetch_batch(session, batch), isrc_by_id, stats)
-        for sid in batch:
-            r = mapped.get(sid)
-            cache[sid] = {k: r.get(k) for k in FEATURE_KEYS} if r else None
-        if n % 10 == 0 or n == len(batches):
-            save_cache(cache)
-            found = sum(1 for sid in batch if cache[sid])
-            print(f"  batch {n}/{len(batches)} done (last batch: {found}/{len(batch)} found)")
-        time.sleep(DELAY)
+    try:
+        for n, batch in enumerate(batches, 1):
+            mapped = map_results(batch, fetch_batch(session, batch), isrc_by_id, stats)
+            for sid in batch:
+                r = mapped.get(sid)
+                feat = {k: r.get(k) for k in FEATURE_KEYS} if r else None
+                bpmdb.save(db, sid, "reccobeats", feat["tempo"] if feat else None, feat)
+            if n % 10 == 0 or n == len(batches):
+                db.commit()
+                found = sum(1 for sid in batch if sid in mapped)
+                print(f"  batch {n}/{len(batches)} done (last batch: {found}/{len(batch)} found)")
+            time.sleep(DELAY)
+    finally:
+        db.commit()
 
     print("\nID mapping check:")
     print(f"  ISRC agrees with Spotify:    {stats['isrc_match']}")
@@ -152,10 +162,10 @@ def pct(a, b):
 
 def print_breakdown(title, rows, key_fn, label_fn=str):
     groups = defaultdict(lambda: [0, 0])
-    for t, feat in rows:
+    for t, entries in rows:
         g = groups[key_fn(t)]
         g[0] += 1
-        g[1] += 1 if feat and feat.get("tempo") is not None else 0
+        g[1] += 1 if bpmdb.best(entries)[0] is not None else 0
     print(f"\nCoverage by {title}:")
     print(f"  {'':<10}{'tracks':>8}{'found':>8}{'coverage':>10}")
     for k in sorted(groups, key=lambda k: (k is None, k)):
@@ -163,21 +173,34 @@ def print_breakdown(title, rows, key_fn, label_fn=str):
         print(f"  {label_fn(k):<10}{total:>8}{found:>8}{pct(found, total):>10}")
 
 
-def report(tracks, cache, seed):
-    rows = [(t, cache.get(t["spotify_id"])) for t in tracks if t["spotify_id"]]
+def report(tracks, lookups, seed):
+    rows = [(t, lookups.get(t["spotify_id"], {})) for t in tracks if t["spotify_id"]]
     skipped = len(tracks) - len(rows)
     total = len(rows)
-    found = [(t, f) for t, f in rows if f and f.get("tempo") is not None]
-    unqueried = sum(1 for t, _ in rows if t["spotify_id"] not in cache)
+    sources = Counter(bpmdb.best(e)[1] for _, e in rows)
+    found = total - sources[None]
+    unqueried = sum(1 for _, e in rows if "reccobeats" not in e)
+    unfilled = sum(1 for _, e in rows
+                   if bpmdb.best(e)[0] is None and "reccobeats" in e and "beatport" not in e)
 
     print("\n=== Summary ===")
     print(f"Total liked songs:   {len(tracks)}")
     if skipped:
         print(f"  (skipped {skipped} local/unavailable tracks with no Spotify ID)")
-    print(f"With tempo:          {len(found)} ({pct(len(found), total).strip()})")
-    print(f"Missing tempo:       {total - len(found)} ({pct(total - len(found), total).strip()})")
+    print(f"With BPM:            {found} ({pct(found, total).strip()})")
+    print(f"Missing BPM:         {total - found} ({pct(total - found, total).strip()})")
     if unqueried:
-        print(f"  ({unqueried} of those not queried yet; run without --report-only)")
+        print(f"  ({unqueried} not checked on ReccoBeats yet; run without --report-only)")
+    if unfilled:
+        print(f"  ({unfilled} not run through fill_gaps.py yet)")
+
+    print("\nBPM by source:")
+    for source in bpmdb.SOURCES:
+        print(f"  {source:<16}{sources[source]:>6}  {pct(sources[source], total)}")
+    verified = sum(1 for _, e in rows if bpmdb.best(e)[1] in ("reccobeats", "beatport", "beatport_title")
+                   and e.get("estimate", (None,))[0] is not None)
+    disputed = sum(1 for _, e in rows if bpmdb.disputed(e))
+    print(f"\nCross-checked against previews: {verified}; disputed (confident estimate disagrees): {disputed}")
 
     print_breakdown("year added", rows, lambda t: (t.get("added_at") or "")[:4] or None,
                     lambda k: k or "unknown")
@@ -190,52 +213,76 @@ def report(tracks, cache, seed):
     with open(CSV_FILE, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["name", "artists", "release_year", "added_at", "spotify_id",
-                    "tempo", "energy", "danceability", "status"])
-        for t, feat in rows:
-            ok = bool(feat and feat.get("tempo") is not None)
+                    "bpm", "bpm_source", "reccobeats_tempo", "beatport_bpm", "estimated_bpm",
+                    "estimate_confidence", "disputed", "energy", "danceability", "status"])
+        for t, e in rows:
+            bpm, source = bpmdb.best(e)
+            rb_bpm, rb = e.get("reccobeats", (None, None))
+            bp_bpm = e.get("beatport", (None,))[0] or e.get("beatport_title", (None,))[0]
+            est_bpm, est = e.get("estimate", (None, None))
             w.writerow([
                 t["name"], "; ".join(t["artists"]), release_year(t.get("release_date")) or "",
                 t.get("added_at") or "", t["spotify_id"],
-                feat["tempo"] if ok else "",
-                feat.get("energy", "") if ok else "",
-                feat.get("danceability", "") if ok else "",
-                "found" if ok else "not_found",
+                bpm if bpm is not None else "", source or "",
+                rb_bpm if rb_bpm is not None else "",
+                bp_bpm if bp_bpm is not None else "",
+                est_bpm if est_bpm is not None else "",
+                (est or {}).get("confidence", "") if est_bpm is not None else "",
+                "yes" if bpmdb.disputed(e) else "",
+                (rb or {}).get("energy", ""), (rb or {}).get("danceability", ""),
+                "found" if bpm is not None else "not_found",
             ])
     print(f"\nWrote {len(rows)} rows to {CSV_FILE}")
 
-    sample = random.Random(seed).sample(found, min(20, len(found)))
-    print(f"\n=== Random sample of {len(sample)} found tracks (seed {seed}) ===")
-    for t, feat in sample:
+    with_bpm = [(t, bpmdb.best(e)) for t, e in rows if bpmdb.best(e)[0] is not None]
+    sample = random.Random(seed).sample(with_bpm, min(20, len(with_bpm)))
+    print(f"\n=== Random sample of {len(sample)} tracks with a BPM (seed {seed}) ===")
+    for t, (bpm, source) in sample:
         artists = ", ".join(t["artists"])
-        print(f"  {feat['tempo']:6.1f} BPM  {artists} - {t['name']}")
+        print(f"  {bpm:6.1f} BPM  [{source}]  {artists} - {t['name']}")
         print(f"              https://open.spotify.com/track/{t['spotify_id']}")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--report-only", action="store_true", help="don't call ReccoBeats, just report from cache")
-    parser.add_argument("--retry-missing", action="store_true", help="re-query tracks cached as not found")
+    parser.add_argument("--report-only", action="store_true", help="don't call ReccoBeats, just report")
+    parser.add_argument("--retry-missing", action="store_true", help="re-query tracks ReccoBeats didn't have")
     parser.add_argument("--seed", type=int, default=None, help="random seed for the sample (default: random)")
+    parser.add_argument("--set", nargs=2, metavar=("SPOTIFY_ID", "BPM"), help="set a manual BPM override")
+    parser.add_argument("--unset", metavar="SPOTIFY_ID", help="remove a manual BPM override")
     args = parser.parse_args()
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
 
-    tracks = load_json(SONGS_FILE, None)
-    if tracks is None:
+    db = bpmdb.connect()
+    if args.set:
+        sid, bpm = args.set
+        bpmdb.save(db, sid, "override", float(bpm))
+        db.commit()
+        print(f"Set {sid} to {float(bpm)} BPM.")
+        return
+    if args.unset:
+        bpmdb.delete(db, args.unset, "override")
+        db.commit()
+        print(f"Removed override for {args.unset}.")
+        return
+
+    if not os.path.exists(SONGS_FILE):
         sys.exit(f"{SONGS_FILE} not found. Run fetch_liked_songs.py first.")
-    cache = load_json(CACHE_FILE, {})
+    with open(SONGS_FILE, encoding="utf-8") as f:
+        tracks = json.load(f)
+    import_old_cache(db)
 
     if not args.report_only:
         try:
-            query_missing(tracks, cache, args.retry_missing)
+            query_missing(db, tracks, bpmdb.load(db), args.retry_missing)
         except KeyboardInterrupt:
-            save_cache(cache)
             print("\nInterrupted; progress saved. Re-run to resume.")
             return
 
     seed = args.seed if args.seed is not None else random.randrange(10_000)
-    report(tracks, cache, seed)
+    report(tracks, bpmdb.load(db), seed)
 
 
 if __name__ == "__main__":

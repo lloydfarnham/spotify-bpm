@@ -2,41 +2,117 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Spotify BPM Checker</title>
-  <style>
-    :root { --bg: #ffffff; --fg: #1d1d1f; --muted: #5f6368; --link: #0b62c4; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg: #16181c; --fg: #e8eaed; --muted: #9aa0a6; --link: #7ab4ff; }
-    }
-    body { margin: 0; background: var(--bg); color: var(--fg);
-           font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
-    main { max-width: 640px; margin: 0 auto; padding: 48px 16px; }
-    h1 { font-size: 1.8rem; margin: 0 0 8px; }
-    p.lede { color: var(--muted); margin-top: 0; }
-    a { color: var(--link); }
-    footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid color-mix(in srgb, var(--fg) 15%, transparent);
-             color: var(--muted); font-size: 0.95rem; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121417">
+  <title>Liked Songs BPM</title>
+  <link rel="stylesheet" href="app.css">
 </head>
 <body>
+  <header class="top">
+    <div class="title-row">
+      <h1>Liked Songs <span class="accent">BPM</span></h1>
+      <button id="update-btn" class="btn ghost" hidden>Update BPMs</button>
+      <button id="login" class="btn primary" hidden>Connect Spotify</button>
+      <button id="logout" class="btn ghost" hidden>Log out</button>
+    </div>
+    <p id="stats" class="stats">Loading…</p>
+
+    <div class="controls">
+      <input id="search" type="search" placeholder="Search title, artist, album" autocomplete="off">
+      <div class="range">
+        <input id="bpm-min" type="number" inputmode="decimal" placeholder="Min BPM" min="0" max="300">
+        <span>–</span>
+        <input id="bpm-max" type="number" inputmode="decimal" placeholder="Max BPM" min="0" max="300">
+      </div>
+      <select id="sort" aria-label="Sort by">
+        <option value="bpm-asc">BPM, low to high</option>
+        <option value="bpm-desc">BPM, high to low</option>
+        <option value="added-desc" selected>Recently added</option>
+        <option value="added-asc">Oldest added</option>
+        <option value="name-asc">Title A–Z</option>
+        <option value="name-desc">Title Z–A</option>
+        <option value="artist-asc">Artist A–Z</option>
+        <option value="year-desc">Release year, newest</option>
+        <option value="year-asc">Release year, oldest</option>
+      </select>
+      <select id="show" aria-label="Show">
+        <option value="all">All songs</option>
+        <option value="bpm">With BPM</option>
+        <option value="sure">With BPM, no estimates</option>
+        <option value="missing">Missing BPM</option>
+        <option value="disputed">Disputed BPM</option>
+      </select>
+      <label class="check"><input id="octave" type="checkbox"> Include half/double time</label>
+    </div>
+  </header>
+
   <main>
-    <h1>Spotify BPM Checker</h1>
-    <p class="lede">A small personal tool that finds the tempo (BPM) of the songs in my Spotify Liked Songs.</p>
+    <section id="update-panel" class="update-panel" hidden>
+      <div class="update-head">
+        <strong>Update BPMs on this computer</strong>
+        <button id="update-close" class="btn ghost small" aria-label="Close">Close</button>
+      </div>
+      <div class="update-opts">
+        <label class="check"><input id="opt-refresh" type="checkbox" checked> Re-fetch liked songs from Spotify</label>
+        <label class="check"><input id="opt-publish" type="checkbox"> Publish to GitHub Pages when done</label>
+      </div>
+      <div class="update-actions">
+        <button id="update-start" class="btn primary">Start</button>
+        <button id="update-cancel" class="btn ghost" hidden>Cancel</button>
+        <span id="update-step" class="update-step"></span>
+      </div>
+      <progress id="update-progress" max="1" value="0" hidden></progress>
+      <ol id="update-steps" class="update-steps"></ol>
+      <details>
+        <summary>Log</summary>
+        <pre id="update-log"></pre>
+      </details>
+    </section>
 
-    <p>It reads my Liked Songs from Spotify (read-only), then looks up each track's tempo
-      from public music-data services, so I can sort and explore my library by BPM.</p>
-
-    <h2>Data sources</h2>
-    <ul>
-      <li>BPM data provided by <a href="https://getsongbpm.com">GetSongBPM</a>.</li>
-      <li>Audio features from <a href="https://reccobeats.com">ReccoBeats</a>.</li>
-      <li>Track library via the <a href="https://developer.spotify.com/documentation/web-api">Spotify Web API</a>.</li>
-    </ul>
-
-    <footer>
-      Tempo data: <a href="https://getsongbpm.com">GetSongBPM</a>
-    </footer>
+    <div class="list-head" aria-hidden="true">
+      <span></span>
+      <button data-sort="name">Title</button>
+      <button data-sort="bpm">BPM</button>
+      <button data-sort="year">Year</button>
+      <button data-sort="added">Added</button>
+      <span></span>
+    </div>
+    <ol id="list" class="list"></ol>
+    <p id="empty" class="empty" hidden>No songs match.</p>
   </main>
+
+  <footer class="credits">
+    BPM data: <a href="https://reccobeats.com">ReccoBeats</a>, <a href="https://www.beatport.com">Beatport</a>,
+    and estimates from <a href="https://www.deezer.com">Deezer</a> previews.
+    Library and playback via the <a href="https://developer.spotify.com/documentation/web-api">Spotify Web API</a>.
+  </footer>
+
+  <div id="player" class="player" hidden>
+    <div class="now">
+      <div id="now-title" class="now-title">Nothing playing</div>
+      <div id="now-sub" class="now-sub"></div>
+    </div>
+    <div class="transport">
+      <button id="prev" class="icon" aria-label="Previous">&#9198;</button>
+      <button id="toggle" class="icon big" aria-label="Play/pause">&#9654;</button>
+      <button id="next" class="icon" aria-label="Next">&#9197;</button>
+    </div>
+    <div class="volume">
+      <span aria-hidden="true">&#128264;</span>
+      <input id="vol" type="range" min="0" max="100" step="1" value="0" disabled aria-label="Volume">
+      <span id="vol-pct" class="time">–</span>
+    </div>
+    <select id="device" aria-label="Play on"></select>
+    <div class="progress">
+      <span id="pos" class="time">0:00</span>
+      <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+      <span id="dur" class="time">0:00</span>
+    </div>
+    <div class="keys">Keys: ← → skip · ↑ ↓ volume · Space play/pause · 1 start … 0 = 90%</div>
+  </div>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="app.js"></script>
 </body>
 </html>

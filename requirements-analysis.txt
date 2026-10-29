@@ -1,0 +1,3 @@
+# Optional: preview-based BPM estimates in fill_gaps.py (pulls in PyTorch, ~500 MB)
+-r requirements.txt
+deeprhythm>=0.0.13

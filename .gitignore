@@ -4,3 +4,5 @@ reccobeats_cache.json
 reccobeats_cache.json.tmp
 results.csv
 __pycache__/
+bpm.db
+.claude/
