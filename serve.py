@@ -220,6 +220,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(200, set_override(sid, bpm))
         return self._json(404, {"error": "not found"})
 
+    def end_headers(self):
+        # Always revalidate, so an edited app.js or a fresh export shows up on reload.
+        if not self.path.startswith("/api/"):
+            self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
     def log_message(self, fmt, *args):
         if args and "/api/status" in str(args[0]):
             return

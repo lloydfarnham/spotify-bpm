@@ -405,13 +405,31 @@ function setRowIcon(row, playing) {
   btn.setAttribute("aria-label", (playing ? "Pause " : "Play ") + name);
 }
 
-// Highlight the current song's row and show pause on it while it plays.
+let scrolledTo = null; // the song we last scrolled into view
+
+// Highlight the current song's row, show pause on it while it plays, and
+// scroll it into view whenever a different song starts.
 function markPlaying() {
   document.querySelectorAll(".row.playing").forEach((r) => { r.classList.remove("playing"); setRowIcon(r, false); });
   $("toggle").innerHTML = isPlaying ? ICON_PAUSE : ICON_PLAY;
   const i = view.findIndex((t) => t.id === nowPlayingId);
   const row = i >= 0 && document.querySelector(`.row[data-i="${i}"]`);
-  if (row) { row.classList.add("playing"); setRowIcon(row, isPlaying); }
+  const songChanged = nowPlayingId !== scrolledTo;
+  scrolledTo = nowPlayingId; // even if it's filtered out, so a later filter change doesn't jump to it
+  if (!row) return;
+  row.classList.add("playing");
+  setRowIcon(row, isPlaying);
+  if (songChanged) {
+    // Keep it clear of the sticky header and the player bar, whatever their current height.
+    const top = document.querySelector(".top");
+    const headerH = getComputedStyle(top).position === "sticky" ? top.offsetHeight : 0;
+    row.style.scrollMarginTop = headerH + 8 + "px";
+    row.style.scrollMarginBottom = ($("player").hidden ? 0 : $("player").offsetHeight) + 8 + "px";
+    // Instant, not smooth: off-screen rows use estimated heights (content-visibility),
+    // so a long smooth scroll can land short. Re-check once the rows have laid out.
+    row.scrollIntoView({ block: "nearest" }); // no-op if already visible
+    setTimeout(() => row.isConnected && row.scrollIntoView({ block: "nearest" }), 120);
+  }
 }
 
 async function transport(action) {

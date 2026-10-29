@@ -10,6 +10,7 @@ import sys
 import time
 
 import bpmdb
+import stamp_assets
 
 SONGS_FILE = "liked_songs.json"
 OUT_FILE = os.path.join("docs", "data", "tracks.json")
@@ -60,6 +61,7 @@ def main():
     disputed = sum(1 for r in rows if "alt" in r)
     print(f"Wrote {len(rows)} tracks ({with_bpm} with BPM, {disputed} disputed) to {OUT_FILE} "
           f"({os.path.getsize(OUT_FILE) // 1024} KB).")
+    stamp_assets.stamp()
 
 
 if __name__ == "__main__":

@@ -135,6 +135,11 @@ beats every other source; **Remove my value** goes back to the automatic BPM.
 Publish with **Update BPMs** to update the live site. From the terminal, the
 same thing is `python check_bpm.py --set SPOTIFY_ID BPM` / `--unset SPOTIFY_ID`.
 
+`index.html` links `app.js?v=…` and `app.css?v=…` with a hash of each file,
+so browsers pick up changes straight away instead of using a cached copy.
+`export_data.py` refreshes the hashes; after editing the app by hand, run
+`python stamp_assets.py`.
+
 Playback needs Spotify Premium. The data file is public: anyone with the URL
 can see your liked songs and their BPMs.
 
